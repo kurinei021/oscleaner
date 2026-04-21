@@ -1,0 +1,37 @@
+{
+  "age_days_tmp_cleanup": 7,
+  "max_largest_entries": 8,
+  "json_indent": 2,
+  "protected_path_names": [
+    "Desktop",
+    "Documents",
+    "Downloads",
+    "Pictures",
+    "Videos",
+    "Music",
+    "OneDrive",
+    "Dropbox",
+    "Google Drive",
+    "iCloud Drive",
+    "Dev",
+    "Developer",
+    "Projects",
+    "Repos",
+    "Repositories",
+    "Workspace",
+    "Workspaces",
+    "Code",
+    "src"
+  ],
+  "excluded_path_fragments": [
+    ".git",
+    ".svn",
+    ".hg",
+    "node_modules/.cache"
+  ],
+  "optional_cleanup": {
+    "homebrew": false,
+    "package_cache": false,
+    "system_temp": false
+  }
+}
