@@ -30,12 +30,23 @@ class Target:
     path: Path
     cleanup_supported: bool
     allowed_root: Path
-    protected: bool = False
     kind: str = "directory"
     age_days: int | None = None
-    requires_opt_in: bool = False
-    opt_in_flag: str | None = None
     note: str | None = None
+
+
+@dataclass
+class RunOptions:
+    command: str
+    confirm: bool = False
+    apply: bool = False
+    json_out: Path | None = None
+    log_file: Path | None = None
+    age_days: int | None = None
+    max_items: int | None = None
+    include_system_temp: bool = False
+    include_package_cache: bool = False
+    include_homebrew: bool = False
 
 
 class HousekeepingEngine:
@@ -45,55 +56,52 @@ class HousekeepingEngine:
         self.home = Path.home()
         self.max_children_per_target = 250
 
-    def run(
-        self,
-        *,
-        mode: str,
-        confirm: bool,
-        apply: bool,
-        json_out: Path | None,
-        log_file: Path | None,
-        age_days: int | None,
-        max_items: int | None,
-        include_system_temp: bool,
-        include_package_cache: bool,
-        include_homebrew: bool,
-    ) -> dict[str, Any]:
-        dry_run = not (mode == "cleanup" and apply and confirm)
-        effective_age_days = age_days or self.config["age_days_tmp_cleanup"]
-        effective_max_items = max_items or self.config["max_largest_entries"]
-        log_path = log_file or Path("logs") / f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+    def run(self, options: RunOptions) -> dict[str, Any]:
+        effective_age_days = options.age_days or self.config["age_days_tmp_cleanup"]
+        effective_max_items = options.max_items or self.config["max_largest_entries"]
+        dry_run = not (options.command == "clean" and options.apply and options.confirm)
+        log_path = options.log_file or Path("logs") / f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
         ensure_parent(log_path)
 
         before_usage = self._collect_disk_usage()
-        targets = self._build_targets(
+        cleanup_targets = self._build_cleanup_targets(
             age_days=effective_age_days,
-            include_system_temp=include_system_temp,
+            include_system_temp=options.include_system_temp,
         )
-        audit_targets = [self._audit_target(target, effective_max_items) for target in targets]
+        cleanup_audit = [self._audit_cleanup_target(target, effective_max_items) for target in cleanup_targets]
+        largest_locations = self._collect_largest_locations(effective_max_items)
+        total_reclaimable = sum(item["estimated_reclaimable_bytes"] for item in cleanup_audit)
+        recommendations = self._build_recommendations(options.include_package_cache, options.include_homebrew)
+        health_checks = self._build_health_checks(before_usage, cleanup_audit)
 
         actions: list[dict[str, Any]] = []
-        recommendations = self._build_recommendations(include_package_cache, include_homebrew)
-        if mode == "cleanup":
-            for target in targets:
+        if options.command == "clean":
+            for target in cleanup_targets:
                 actions.append(self._cleanup_target(target, dry_run=dry_run))
 
         after_usage = self._collect_disk_usage()
         disk_usage = self._merge_disk_usage(before_usage, after_usage)
-
         report = {
             "meta": {
                 "platform": self.system,
                 "generated_at": now_utc_iso(),
-                "mode": mode,
+                "command": options.command,
                 "dry_run": dry_run,
-                "confirm": confirm,
+                "confirm": options.confirm,
+                "apply": options.apply,
                 "log_file": str(log_path),
+            },
+            "overview": {
+                "total_reclaimable_bytes": total_reclaimable,
+                "largest_cleanup_target": self._largest_cleanup_target(cleanup_audit),
+                "cleanup_target_count": len(cleanup_audit),
             },
             "audit": {
                 "disk_usage": disk_usage,
-                "targets": audit_targets,
+                "targets": cleanup_audit,
+                "largest_locations": largest_locations,
             },
+            "health_checks": health_checks,
             "actions": actions,
             "recommendations": recommendations,
         }
@@ -102,18 +110,17 @@ class HousekeepingEngine:
             handle.write(json.dumps(report, indent=2))
             handle.write("\n")
 
-        if json_out:
-            write_json(json_out, report, indent=self.config["json_indent"])
+        if options.json_out:
+            write_json(options.json_out, report, indent=self.config["json_indent"])
 
         return report
 
     def _collect_disk_usage(self) -> list[dict[str, Any]]:
         candidates: list[tuple[str, Path]] = [("Home volume", self.home)]
-        if self.system != "Windows":
-            candidates.append(("Root volume", Path("/")))
+        if self.system == "Windows":
+            candidates.append(("System drive", Path(os.environ.get("SystemDrive", "C:\\"))))
         else:
-            system_drive = Path(os.environ.get("SystemDrive", "C:\\"))
-            candidates.append(("System drive", system_drive))
+            candidates.append(("Root volume", Path("/")))
 
         results = []
         for label, path in candidates:
@@ -137,7 +144,7 @@ class HousekeepingEngine:
             )
         return merged
 
-    def _build_targets(self, *, age_days: int, include_system_temp: bool) -> list[Target]:
+    def _build_cleanup_targets(self, *, age_days: int, include_system_temp: bool) -> list[Target]:
         if self.system == "Windows":
             return self._windows_targets(include_system_temp)
         if self.system == "Darwin":
@@ -170,6 +177,7 @@ class HousekeepingEngine:
                 True,
                 Path(os.environ.get("SystemDrive", "C:\\")) / "$Recycle.Bin",
                 kind="windows_recycle_bin",
+                note="Only cleared after explicit clean --confirm --apply.",
             ),
         ]
         if include_system_temp:
@@ -181,8 +189,6 @@ class HousekeepingEngine:
                     system_root / "Temp",
                     True,
                     system_root / "Temp",
-                    requires_opt_in=True,
-                    opt_in_flag="--include-system-temp",
                     note="May require admin privileges depending on system configuration.",
                 )
             )
@@ -243,23 +249,136 @@ class HousekeepingEngine:
                 True,
                 Path("/tmp"),
                 age_days=age_days,
+                note="Only entries older than the configured age and owned by the current user are eligible.",
             ),
         ]
 
+    def _collect_largest_locations(self, max_items: int) -> list[dict[str, Any]]:
+        locations = []
+        for child in self._iter_analysis_roots():
+            size_bytes = self._fast_path_size(child)
+            locations.append(
+                {
+                    "label": child.name or str(child),
+                    "path": str(child),
+                    "size_bytes": size_bytes,
+                    "category": self._categorize_location(child),
+                }
+            )
+        locations.sort(key=lambda item: item["size_bytes"], reverse=True)
+        return locations[:max_items]
+
+    def _iter_analysis_roots(self) -> list[Path]:
+        candidates: list[Path] = []
+        if self.home.exists():
+            for index, child in enumerate(iter_accessible_children(self.home)):
+                if index >= self.max_children_per_target:
+                    break
+                if child.name.startswith("."):
+                    continue
+                candidates.append(child)
+
+        platform_specific = []
+        if self.system == "Darwin":
+            platform_specific = [self.home / "Library", self.home / "Applications"]
+        elif self.system == "Windows":
+            platform_specific = [
+                Path(os.environ.get("LOCALAPPDATA", self.home / "AppData/Local")),
+                Path(os.environ.get("APPDATA", self.home / "AppData/Roaming")),
+            ]
+        else:
+            platform_specific = [self.home / ".cache", self.home / ".local/share"]
+
+        for candidate in platform_specific:
+            if candidate.exists():
+                candidates.append(candidate)
+
+        deduped: list[Path] = []
+        seen = set()
+        for candidate in candidates:
+            normalized = str(candidate.resolve(strict=False))
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            deduped.append(candidate)
+        return deduped
+
+    def _categorize_location(self, path: Path) -> str:
+        lower = path.name.lower()
+        if lower in {"downloads", "documents", "desktop", "pictures", "videos", "music"}:
+            return "user-content"
+        if "cache" in lower or lower == "library":
+            return "cache-or-library"
+        if lower in {"applications", "appdata"}:
+            return "apps"
+        if lower in {"dev", "developer", "projects", "code", "src"}:
+            return "developer"
+        return "home"
+
+    def _largest_cleanup_target(self, cleanup_audit: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not cleanup_audit:
+            return None
+        return max(cleanup_audit, key=lambda item: item["estimated_reclaimable_bytes"])
+
+    def _build_health_checks(
+        self, disk_usage: list[dict[str, Any]], cleanup_audit: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        checks = []
+        total_reclaimable = sum(item["estimated_reclaimable_bytes"] for item in cleanup_audit)
+        primary_volume = disk_usage[0]["usage"] if disk_usage else {}
+        total = primary_volume.get("total", 0)
+        free = primary_volume.get("free", 0)
+        free_ratio = (free / total) if total else 1.0
+
+        if free_ratio < 0.1:
+            checks.append(
+                {
+                    "severity": "high",
+                    "title": "Low free space",
+                    "detail": f"Free space is below 10% on the primary volume ({format_bytes(free)} remaining).",
+                }
+            )
+        elif free_ratio < 0.2:
+            checks.append(
+                {
+                    "severity": "medium",
+                    "title": "Free space is tightening",
+                    "detail": f"Free space is below 20% on the primary volume ({format_bytes(free)} remaining).",
+                }
+            )
+
+        if total_reclaimable > 5 * 1024 * 1024 * 1024:
+            checks.append(
+                {
+                    "severity": "medium",
+                    "title": "Large reclaim opportunity",
+                    "detail": f"Safe cleanup targets currently account for about {format_bytes(total_reclaimable)}.",
+                }
+            )
+
+        if not checks:
+            checks.append(
+                {
+                    "severity": "info",
+                    "title": "No urgent housekeeping issues",
+                    "detail": "The current snapshot does not show a critical low-space condition in the audited safe targets.",
+                }
+            )
+        return checks
+
     def _build_recommendations(self, include_package_cache: bool, include_homebrew: bool) -> list[str]:
-        recommendations: list[str] = []
-        recommendations.append(
-            "Review startup-impact tools manually; this project reports safe cleanup opportunities but does not disable startup apps automatically."
-        )
+        recommendations = [
+            "Review startup-impact tools manually; oscleaner reports opportunities but does not disable startup items automatically."
+        ]
 
         if self.system == "Windows":
             recommendations.append(
-                "For deeper Windows cleanup, review Storage Sense or Disk Cleanup manually before enabling anything persistent."
+                "If you need deeper Windows cleanup, review Storage Sense or Disk Cleanup manually before enabling any persistent behavior."
             )
         elif self.system == "Darwin":
             if include_homebrew and shutil.which("brew"):
                 recommendations.append(
-                    "Homebrew detected. Review `brew cleanup -s --prune=all --dry-run` manually before any package-cache cleanup."
+                    "Homebrew detected. Review `brew cleanup -s --prune=all --dry-run` manually before opting into package-cache cleanup."
                 )
         else:
             if include_package_cache:
@@ -272,6 +391,10 @@ class HousekeepingEngine:
                 recommendations.append(
                     f"Package cache guidance for {distro or 'unknown distro'}: {command}"
                 )
+
+        recommendations.append(
+            "Use dry-run first for every destructive path. Real cleanup still requires both --confirm and --apply."
+        )
         return recommendations
 
     def _detect_linux_distro(self) -> str | None:
@@ -280,7 +403,7 @@ class HousekeepingEngine:
                 return candidate
         return None
 
-    def _audit_target(self, target: Target, max_items: int) -> dict[str, Any]:
+    def _audit_cleanup_target(self, target: Target, max_items: int) -> dict[str, Any]:
         exists = target.path.exists()
         estimated = self._estimate_target_bytes(target) if exists else 0
         largest_entries = self._largest_entries(target.path, max_items, target) if exists else []
@@ -363,12 +486,7 @@ class HousekeepingEngine:
 
         try:
             subprocess.run(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-Command",
-                    "Clear-RecycleBin -Force",
-                ],
+                ["powershell", "-NoProfile", "-Command", "Clear-RecycleBin -Force"],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -389,7 +507,11 @@ class HousekeepingEngine:
         if target.kind == "windows_recycle_bin":
             return list(iter_accessible_children(target.path))
         if target.id == "linux-tmp":
-            return [path for path in iter_accessible_children(target.path) if self._linux_tmp_candidate(path, target.age_days or 0)]
+            return [
+                path
+                for path in iter_accessible_children(target.path)
+                if self._linux_tmp_candidate(path, target.age_days or 0)
+            ]
         return list(iter_accessible_children(target.path))
 
     def _linux_tmp_candidate(self, path: Path, age_days: int) -> bool:

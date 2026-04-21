@@ -1,6 +1,6 @@
 param(
-    [ValidateSet("audit", "cleanup")]
-    [string]$Mode = "audit",
+    [ValidateSet("audit", "clean", "analyze", "doctor", "status")]
+    [string]$Command = "audit",
     [switch]$ConfirmCleanup,
     [switch]$Apply,
     [switch]$IncludeSystemTemp,
@@ -11,7 +11,7 @@ param(
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RootDir = Resolve-Path (Join-Path $ScriptDir "..")
-$ArgsList = @("$RootDir/safe_start.py", "--mode", $Mode)
+$ArgsList = @("$RootDir/oscleaner.py", $Command)
 
 if ($ConfirmCleanup) { $ArgsList += "--confirm" }
 if ($Apply) { $ArgsList += "--apply" }
@@ -20,5 +20,5 @@ if ($IncludePackageCache) { $ArgsList += "--include-package-cache" }
 if ($JsonOut) { $ArgsList += @("--json-out", $JsonOut) }
 if ($LogFile) { $ArgsList += @("--log-file", $LogFile) }
 
-Write-Host "Running oscleaner in $Mode mode..."
+Write-Host "Running oscleaner $Command..."
 python $ArgsList

@@ -11,10 +11,19 @@ class ReportingTests(unittest.TestCase):
             "meta": {
                 "platform": "Linux",
                 "generated_at": "2026-04-21T08:00:00+00:00",
-                "mode": "audit",
+                "command": "audit",
                 "dry_run": True,
                 "confirm": False,
+                "apply": False,
                 "log_file": "logs/test.log",
+            },
+            "overview": {
+                "total_reclaimable_bytes": 50,
+                "largest_cleanup_target": {
+                    "label": "Linux user cache",
+                    "estimated_reclaimable_bytes": 50,
+                },
+                "cleanup_target_count": 1,
             },
             "audit": {
                 "disk_usage": [
@@ -30,9 +39,19 @@ class ReportingTests(unittest.TestCase):
                         "estimated_reclaimable_bytes": 50,
                         "path": "/home/example/.cache",
                         "largest_entries": [{"name": "pip", "size_bytes": 25}],
+                        "note": None,
+                    }
+                ],
+                "largest_locations": [
+                    {
+                        "label": "Downloads",
+                        "size_bytes": 99,
+                        "category": "user-content",
+                        "path": "/home/example/Downloads",
                     }
                 ],
             },
+            "health_checks": [{"severity": "info", "title": "Healthy", "detail": "Looks fine."}],
             "actions": [],
             "recommendations": ["Review startup items manually."],
         }
@@ -40,6 +59,7 @@ class ReportingTests(unittest.TestCase):
         self.assertIn("Disk summary", output)
         self.assertIn("Linux user cache", output)
         self.assertIn("Recommendations", output)
+        self.assertIn("Largest locations snapshot", output)
 
 
 if __name__ == "__main__":

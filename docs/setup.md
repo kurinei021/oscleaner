@@ -15,7 +15,7 @@ No third-party Python packages are required.
 3. Run an audit-only report first:
 
 ```bash
-python3 safe_start.py
+python3 oscleaner.py audit
 ```
 
 ## Optional wrapper usage
@@ -44,13 +44,13 @@ pwsh -File .\windows\run.ps1
 
 1. Run `audit` mode.
 2. Review the console summary, JSON report, and log file.
-3. Run `cleanup` mode without `--apply` to preview deletion candidates.
-4. Only then consider `--mode cleanup --confirm --apply`.
+3. Run `clean` without `--apply` to preview deletion candidates.
+4. Only then consider `python3 oscleaner.py clean --confirm --apply`.
 
 ## Local customization
 
 If you want a separate config, copy the example file and pass it with:
 
 ```bash
-python3 safe_start.py --config path/to/local-config.json
+python3 oscleaner.py audit --config path/to/local-config.json
 ```

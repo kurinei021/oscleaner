@@ -1,6 +1,6 @@
 # oscleaner
 
-`oscleaner` is a conservative, cross-platform device housekeeping toolkit for Windows, macOS, and Linux. It audits disk usage, highlights safe cleanup opportunities, and performs controlled cleanup only when you explicitly approve it.
+`oscleaner` is a conservative, cross-platform device housekeeping toolkit for Windows, macOS, and Linux. It takes the "all-in-one maintenance CLI" idea and rebuilds it around stricter safety: audit-first workflows, protected-path rules, reviewable reports, and controlled cleanup only after explicit approval.
 
 The project is intentionally opinionated:
 
@@ -12,9 +12,38 @@ The project is intentionally opinionated:
 - No user-content deletion
 - No one-click aggressive mode
 
+## Why this direction
+
+`oscleaner` is meant to feel like a polished local housekeeping tool rather than a loose collection of scripts, but it deliberately avoids the riskiest categories of system modification. The product direction is:
+
+- Multi-command CLI instead of a single one-shot script
+- Read-only inspection before any destructive step
+- Cross-platform safe cleanup targets only
+- Human-friendly console output and JSON for automation
+- Recommendations for manual follow-up rather than hidden system changes
+
+## Commands
+
+```bash
+python3 oscleaner.py audit
+python3 oscleaner.py clean
+python3 oscleaner.py analyze
+python3 oscleaner.py doctor
+python3 oscleaner.py status
+```
+
+- `audit`: read-only audit of safe cleanup targets plus large-location summaries
+- `clean`: preview or apply cleanup within safe targets only
+- `analyze`: show the largest visible user-safe locations and the heaviest cleanup buckets
+- `doctor`: highlight space pressure and housekeeping warnings
+- `status`: quick current-state snapshot
+
+The legacy [safe_start.py](/Users/carmie/DevProject/oscleaner/safe_start.py:1) entrypoint still exists and defaults to `audit`.
+
 ## Project layout
 
-- `safe_start.py`: top-level safe entrypoint that runs audit mode by default
+- `oscleaner.py`: primary multi-command CLI entrypoint
+- `safe_start.py`: compatibility entrypoint that runs audit mode by default
 - `shared/`: cross-platform Python safety, reporting, and orchestration code
 - `windows/`: PowerShell wrapper and Windows-specific notes
 - `macos/`: shell wrapper and macOS-specific notes
@@ -30,6 +59,7 @@ Audit only on the current platform:
 
 ```bash
 python3 safe_start.py
+python3 oscleaner.py audit
 ```
 
 Use the platform wrapper instead:
@@ -43,19 +73,32 @@ pwsh -File .\windows\run.ps1
 Write a JSON report:
 
 ```bash
-python3 safe_start.py --json-out logs/audit-report.json
+python3 oscleaner.py audit --json-out logs/audit-report.json
 ```
 
 Preview cleanup without deleting anything:
 
 ```bash
-python3 safe_start.py --mode cleanup
+python3 oscleaner.py clean
 ```
 
 Apply cleanup only after explicit approval:
 
 ```bash
-python3 safe_start.py --mode cleanup --confirm --apply
+python3 oscleaner.py clean --confirm --apply
+```
+
+Inspect what is actually taking space in user-visible locations:
+
+```bash
+python3 oscleaner.py analyze
+```
+
+Get a concise device-health summary:
+
+```bash
+python3 oscleaner.py doctor
+python3 oscleaner.py status
 ```
 
 ## Safety model
@@ -64,7 +107,7 @@ The tool only targets a narrow allowlist of cleanup locations such as user temp 
 
 Three conditions must all be true before files are deleted:
 
-1. You selected `--mode cleanup`.
+1. You selected the `clean` command.
 2. You passed `--confirm`.
 3. You passed `--apply`.
 
