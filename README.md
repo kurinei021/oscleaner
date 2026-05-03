@@ -33,10 +33,10 @@ python3 oscleaner.py status
 ```
 
 - `audit`: read-only audit of safe cleanup targets plus large-location summaries
-- `clean`: preview or apply cleanup within safe targets only
-- `analyze`: show the largest visible user-safe locations and the heaviest cleanup buckets
-- `doctor`: highlight space pressure and housekeeping warnings
-- `status`: quick current-state snapshot
+- `clean`: preview or apply cleanup within safe targets only, with before/after disk comparison
+- `analyze`: investigate what is taking space across visible locations and category totals
+- `doctor`: highlight space pressure, cleanup caveats, and housekeeping recommendations
+- `status`: quick current-state snapshot with only the top space signals
 
 The legacy [safe_start.py](/Users/carmie/DevProject/oscleaner/safe_start.py:1) entrypoint still exists and defaults to `audit`.
 

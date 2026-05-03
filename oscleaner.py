@@ -48,6 +48,12 @@ def _add_common_flags(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Include Homebrew cleanup guidance on macOS when brew is available.",
     )
+    parser.add_argument(
+        "--view",
+        choices=("text", "dashboard"),
+        default="text",
+        help="Console presentation style. Default: text.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -75,6 +81,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     analyze = subparsers.add_parser("analyze", help="Inspect the largest user-safe locations.")
     _add_common_flags(analyze)
+    analyze.add_argument(
+        "--path",
+        help="Optional path to inspect more deeply instead of the default home-level scan.",
+    )
+    analyze.add_argument(
+        "--depth",
+        type=int,
+        default=2,
+        help="Directory depth to inspect for analyze output. Default: 2.",
+    )
 
     doctor = subparsers.add_parser("doctor", help="Show device-health warnings and housekeeping advice.")
     _add_common_flags(doctor)
@@ -104,6 +120,9 @@ def _options_from_args(args: argparse.Namespace) -> RunOptions:
         include_system_temp=getattr(args, "include_system_temp", False),
         include_package_cache=getattr(args, "include_package_cache", False),
         include_homebrew=getattr(args, "include_homebrew", False),
+        analyze_path=Path(args.path).expanduser() if getattr(args, "path", None) else None,
+        analyze_depth=getattr(args, "depth", None),
+        view=getattr(args, "view", "text"),
     )
 
 

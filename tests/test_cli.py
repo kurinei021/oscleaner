@@ -18,6 +18,14 @@ class CliTests(unittest.TestCase):
         args = parser.parse_args(["audit"])
         self.assertEqual(args.command, "audit")
 
+    def test_analyze_accepts_path_and_depth(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["analyze", "--path", "~/Downloads", "--depth", "3", "--view", "dashboard"])
+        self.assertEqual(args.command, "analyze")
+        self.assertEqual(args.path, "~/Downloads")
+        self.assertEqual(args.depth, 3)
+        self.assertEqual(args.view, "dashboard")
+
 
 if __name__ == "__main__":
     unittest.main()
